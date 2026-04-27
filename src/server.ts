@@ -21,6 +21,30 @@ function rows<T = unknown>(sql: string, params: unknown[] = []): T[] {
   return db().prepare(sql).all(...params) as T[];
 }
 
+function lastSyncAt(userId: number): number | null {
+  const row = rows<{ last_sync_at: number | null }>(
+    "select last_sync_at from sync_state where whoop_user_id = ?",
+    [userId]
+  )[0];
+  return row?.last_sync_at ?? null;
+}
+
+function freshnessLine(userId: number): string {
+  const ts = lastSyncAt(userId);
+  if (!ts) return "_Cache empty. Run whoop_sync to populate._";
+  const ageMs = Date.now() - ts;
+  const ageMin = Math.round(ageMs / 60000);
+  if (ageMin < 60) {
+    return `_Cache age: ${ageMin} min. Run whoop_sync if you need today's most recent recovery/workout data._`;
+  }
+  const ageHr = Math.round(ageMin / 60);
+  if (ageHr < 48) {
+    return `_Cache age: ${ageHr}h. Stale — run whoop_sync before answering time-sensitive biometric questions._`;
+  }
+  const ageDay = Math.round(ageHr / 24);
+  return `_Cache age: ${ageDay}d. STALE — call whoop_sync first._`;
+}
+
 function todaySnapshot(userId: number): string {
   const since = new Date();
   since.setDate(since.getDate() - 14);
@@ -118,13 +142,28 @@ function todaySnapshot(userId: number): string {
   lines.push(
     `(${recent.length} cycles, ${sleep.length} sleeps in cache, last 14d. Use whoop_query for ad-hoc SQL or whoop_recovery_trend for series.)`
   );
+  lines.push("");
+  lines.push(freshnessLine(userId));
   return lines.join("\n");
 }
 
 export async function runServer(): Promise<void> {
   const server = new Server(
-    { name: "whoop-mcp", version: "0.1.0" },
-    { capabilities: { tools: {} } }
+    { name: "whoop-mcp", version: "0.2.0" },
+    {
+      capabilities: { tools: {} },
+      instructions: `Whoop biometrics access. Read tools (whoop_today, whoop_recovery_trend, whoop_sleep_history, whoop_workouts, whoop_query) serve a LOCAL SQLite cache only — they do NOT hit the Whoop API. Only whoop_sync pulls fresh data from Whoop.
+
+CALL whoop_sync FIRST when the user asks about: today's recovery, today's sleep, today's workout, current HRV, fitness, training, body, mood, energy, life decisions ("should I"), relationships, emotional state, or anything biometric-adjacent.
+
+SKIP sync for pure coding, repo, or docs work — cached read-tool data is fine for general/historical questions.
+
+Whoop API lag: sleep + recovery for the most recent night appear 30-90 min after wake. Workouts appear within 5-10 min of end. If today's recovery is missing after a fresh sync, the user just woke up — say so.
+
+For HR zone breakdowns (Z1-Z5 minutes), altitude gain, or sport-specific deep-dives, use whoop_query against the workouts table — the default whoop_workouts tool only returns basic stats. Zone columns: zone_zero_milli through zone_five_milli.
+
+The whoop_today output includes a cache-age footer. Use it to decide if a re-sync is worth it before answering.`
+    }
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -132,7 +171,7 @@ export async function runServer(): Promise<void> {
       {
         name: "whoop_today",
         description:
-          "Return a Markdown snapshot of today's Whoop biometrics + 7-day averages. Always call this first when the user asks about their body, recovery, training readiness, or nutrition. Reads from the local SQLite cache — fast.",
+          "Return a Markdown snapshot of today's Whoop biometrics + 7-day averages. Reads from the local SQLite cache — fast. Output includes a cache-age footer so you can decide if a re-sync is needed. For time-sensitive questions about today, call whoop_sync first.",
         inputSchema: { type: "object", properties: {} },
       },
       {
@@ -163,7 +202,7 @@ export async function runServer(): Promise<void> {
       {
         name: "whoop_workouts",
         description:
-          "Return workout records for the last N days with sport, strain, HR, and zone breakdown.",
+          "Return workout records for the last N days. Basic stats only: sport, strain, HR (avg/max), kcal, distance. For HR zone breakdown (Z1-Z5 minutes), altitude gain, or sport-specific deep-dives, use whoop_query against the workouts table — those columns are stored but not in this tool's output.",
         inputSchema: {
           type: "object",
           properties: {
@@ -190,7 +229,7 @@ export async function runServer(): Promise<void> {
       {
         name: "whoop_sync",
         description:
-          "Pull the latest data from Whoop into the local cache. Default window is 7 days back. Run when you need fresh data.",
+          "Pull the latest data from Whoop API into the local cache. Default window is 7 days back. CALL THIS FIRST for any time-sensitive biometric question (today's recovery/sleep/workout, current HRV, fitness/life decisions). Read tools serve cached data — they do not hit the Whoop API themselves.",
         inputSchema: {
           type: "object",
           properties: {
