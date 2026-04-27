@@ -1,0 +1,51 @@
+{
+  "name": "@nchemb/whoop-mcp",
+  "version": "0.1.0",
+  "description": "MCP server giving Claude (or any MCP client) access to your Whoop data. OAuth via shared relay, data cached locally in SQLite.",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "whoop-mcp": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "prepublishOnly": "npm run build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nchemb/whoop-mcp.git"
+  },
+  "homepage": "https://github.com/nchemb/whoop-mcp#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "whoop",
+    "claude",
+    "fitness",
+    "health",
+    "oauth"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.20.0",
+    "better-sqlite3": "^11.7.0",
+    "open": "^10.1.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.2"
+  }
+}
