@@ -18,7 +18,9 @@ It is **not** a chatbot. It's a building block. Once installed, you can:
 
 **Your tokens stay on your machine.** A shared OAuth relay handles the Whoop login handshake (no need to register your own Whoop app), then forgets you. Your biometric data is never uploaded anywhere — it lives in `~/.whoop-mcp/whoop.db` and only your local Claude session reads it.
 
-> **Status:** v0.1 — using the shared OAuth app under Whoop's "test users" tier (capped at 10 concurrent users until app approval clears). If install fails with an "app at capacity" error, the cap has been hit; either run your own relay (instructions below) or open an issue and I'll bump approval.
+> **Status:** v0.3 — the shared OAuth app is approved for **100 connected users** (raised by Whoop, Sep 2026). If the authorize screen ever says "app at capacity", open an issue and I'll request a bump, or run your own relay (instructions below).
+>
+> **Requires Node 22.13+.** v0.3 uses Node's built-in `node:sqlite`, so there are no native modules to compile and `npx` installs in seconds on any platform.
 
 ---
 
@@ -57,9 +59,9 @@ Claude picks the right tool — `whoop_today` for snapshots, `whoop_recovery_tre
 | `whoop_today` | Markdown snapshot of today + 7-day averages. Always call first when the user asks about their body. |
 | `whoop_recovery_trend` | Recovery, HRV, RHR per day for the last N days (default 30). |
 | `whoop_sleep_history` | Sleep records (non-nap) with stages, performance, efficiency, respiratory rate. |
-| `whoop_workouts` | Workouts with sport, strain, HR, kilojoule burn, distance, zone time. |
+| `whoop_workouts` | Workouts with sport, strain, HR, kilojoule + kcal burn, distance. Zone time via `whoop_query`. |
 | `whoop_query` | Read-only SQL against the local cache. Tables: `profile`, `cycles`, `recovery`, `sleep`, `workouts`. |
-| `whoop_sync` | Pull the latest N days from Whoop API into the cache (default 7). |
+| `whoop_sync` | Pull the latest N days from Whoop API into the cache (default 7). If the cache is older than that, it widens the window back to the last sync so nothing is skipped. |
 
 ### Local schema
 
@@ -181,10 +183,16 @@ Cache is empty. Run init.
 Restart your Claude Code session. MCP servers are loaded at startup.
 
 **`app at capacity` from Whoop's authorize screen**
-The shared OAuth app hit its 10-user cap. Open an issue or run your own relay.
+The shared OAuth app hit its 100-user cap. Open an issue or run your own relay.
+
+**`No such built-in module: node:sqlite`**
+Your Node is older than 22.13. `node -v` to check, then upgrade (`nvm install 22` or `brew upgrade node`). v0.2.x used a native SQLite module that also fails to compile on Node 24+, so upgrading Node is the fix either way.
 
 **Stale data**
-Run `whoop-mcp sync` (or ask Claude to call `whoop_sync`). Default window is 7 days back.
+Run `whoop-mcp sync` (or ask Claude to call `whoop_sync`). Default window is 7 days back, auto-widened to cover any gap since the last sync.
+
+**`whoop_today` shows "No data in the last 14 days"**
+The strap is off, or the Whoop app hasn't uploaded. The line tells you the last recorded cycle date.
 
 ---
 

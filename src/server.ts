@@ -18,7 +18,7 @@ function requireUser(): number {
 }
 
 function rows<T = unknown>(sql: string, params: unknown[] = []): T[] {
-  return db().prepare(sql).all(...params) as T[];
+  return db().prepare(sql).all(...(params as never[])) as T[];
 }
 
 function lastSyncAt(userId: number): number | null {
@@ -109,7 +109,22 @@ function todaySnapshot(userId: number): string {
     );
   }
   lines.push("");
-  lines.push("## Today");
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const latestDay = today?.start_at.slice(0, 10);
+  if (!today) {
+    const lastEver = rows<{ day: string }>(
+      "select substr(start_at, 1, 10) as day from cycles where whoop_user_id = ? order by start_at desc limit 1",
+      [userId]
+    )[0];
+    lines.push("## Today");
+    lines.push(
+      `- No data in the last 14 days. Last recorded cycle: ${lastEver?.day ?? "never"}. The strap is probably off or not synced to the Whoop app.`
+    );
+  } else {
+    lines.push(
+      latestDay === todayISO ? "## Today" : `## Latest cycle (${latestDay}, not today)`
+    );
+  }
   lines.push(
     `- Recovery: ${today?.recovery_score != null ? `${Math.round(today.recovery_score)}%` : "—"}`
   );
@@ -149,7 +164,7 @@ function todaySnapshot(userId: number): string {
 
 export async function runServer(): Promise<void> {
   const server = new Server(
-    { name: "whoop-mcp", version: "0.2.0" },
+    { name: "whoop-mcp", version: "0.3.0" },
     {
       capabilities: { tools: {} },
       instructions: `Whoop biometrics access. Read tools (whoop_today, whoop_recovery_trend, whoop_sleep_history, whoop_workouts, whoop_query) serve a LOCAL SQLite cache only — they do NOT hit the Whoop API. Only whoop_sync pulls fresh data from Whoop.
@@ -295,7 +310,8 @@ The whoop_today output includes a cache-age footer. Use it to decide if a re-syn
         const data = rows(
           `select id, substr(start_at, 1, 10) as day, start_at, end_at,
                   sport_id, sport_name, strain, average_heart_rate,
-                  max_heart_rate, kilojoule, distance_meter
+                  max_heart_rate, kilojoule, round(kilojoule / 4.184) as kcal,
+                  distance_meter
            from workouts
            where whoop_user_id = ? and start_at >= ?
            order by start_at desc`,
@@ -314,7 +330,10 @@ The whoop_today output includes a cache-age footer. Use it to decide if a re-syn
         if (/(insert|update|delete|drop|alter|create|attach|pragma)\b/i.test(sql)) {
           throw new Error("Read-only queries only.");
         }
-        const data = db().prepare(sql).all();
+        if (/\b(tokens|kv|sqlite_master|sqlite_schema)\b/i.test(sql)) {
+          throw new Error("That table holds credentials, not biometrics. Query profile, cycles, recovery, sleep, or workouts.");
+        }
+        const data = db().prepare(sql).all() as unknown[];
         return {
           content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
         };
@@ -322,10 +341,14 @@ The whoop_today output includes a cache-age footer. Use it to decide if a re-syn
 
       case "whoop_sync": {
         const days = Number(args.days ?? 7);
-        const startISO = monthsAgoISO(0);
         const since = new Date();
         since.setDate(since.getDate() - days);
-        void startISO; // not used; we want a day-range, not month-range
+        // Never leave a hole: if the cache is older than the requested window,
+        // pull from a day before the last sync (capped at 6 months).
+        const last = lastSyncAt(userId);
+        if (last && last - 86_400_000 < since.getTime()) {
+          since.setTime(Math.max(last - 86_400_000, Date.parse(monthsAgoISO(6))));
+        }
         const counts = await syncWindow(
           userId,
           since.toISOString(),
@@ -335,7 +358,7 @@ The whoop_today output includes a cache-age footer. Use it to decide if a re-syn
           content: [
             {
               type: "text",
-              text: `Synced last ${days}d: ${JSON.stringify(counts)}`,
+              text: `Synced since ${since.toISOString().slice(0, 10)}: ${JSON.stringify(counts)}`,
             },
           ],
         };

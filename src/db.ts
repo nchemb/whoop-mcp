@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,13 +6,13 @@ import { dirname, join } from "node:path";
 const DB_PATH =
   process.env.WHOOP_MCP_DB ?? join(homedir(), ".whoop-mcp", "whoop.db");
 
-let cached: Database.Database | null = null;
+let cached: DatabaseSync | null = null;
 
-export function db(): Database.Database {
+export function db(): DatabaseSync {
   if (cached) return cached;
   mkdirSync(dirname(DB_PATH), { recursive: true });
-  const d = new Database(DB_PATH);
-  d.pragma("journal_mode = WAL");
+  const d = new DatabaseSync(DB_PATH);
+  d.exec("pragma journal_mode = WAL");
   d.exec(SCHEMA);
   cached = d;
   return d;
